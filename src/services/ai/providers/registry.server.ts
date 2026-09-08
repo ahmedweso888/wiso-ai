@@ -32,6 +32,7 @@ export type AiSettingsRow = {
   fallback_enabled: boolean;
   fallback_provider: string | null;
   enabled: boolean;
+  auto_routing_enabled?: boolean;
 };
 
 export function resolveAiConfig(settings?: AiSettingsRow | null): AiConfig {

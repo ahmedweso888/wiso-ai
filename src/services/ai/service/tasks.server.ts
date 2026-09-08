@@ -1,8 +1,15 @@
 /**
  * Provider-independent Study Agent tasks. Prompts + normalized JSON schemas live
  * here; the provider is an implementation detail resolved by the runtime.
+ *
+ * WISO Engine integration: question generation now flows through the batch
+ * orchestrator which handles routing (Luna/Terra/Sol), validation gate,
+ * dedup, retry, and escalation automatically.
  */
 import { runStructuredTask } from "./runtime.server";
+import { generateBatch } from "../engine/batch.server";
+import { withCredits } from "../engine/credits.server";
+import { getActiveConfig } from "./runtime.server";
 import type {
   ExtractedSyllabus,
   GeneratedPlan,
@@ -14,6 +21,7 @@ import type {
   QuestionGenerationRequest,
   ValidationReport,
 } from "../types";
+import type { TierId } from "../engine/config";
 
 const OBJ = (properties: Record<string, unknown>) => ({
   type: "object",
@@ -56,22 +64,71 @@ Hard means: deep understanding, multi-concept transfer, hidden assumptions, comm
 NEVER make a question hard by adding pointless numbers or length. NEVER go outside the student's syllabus. NEVER produce ambiguous or impossible questions.
 Every question needs difficultyScore, conceptsTested, correctAnswer, explanation, sourceReferences, commonTrap and estimatedTimeSeconds.`;
 
+/**
+ * Generate questions through the WISO batch orchestrator.
+ * Handles: routing (Luna/Terra/Sol), validation gate, dedup, retry, escalation.
+ * Credit reservation is handled atomically via the credits module.
+ */
 export async function generateQuestionsTask(
   userId: string,
   request: QuestionGenerationRequest,
 ): Promise<GeneratedQuestion[]> {
-  const result = await runStructuredTask<{ questions: GeneratedQuestion[] }>({
+  const { autoRoutingEnabled, config } = await getActiveConfig();
+
+  // Inject the provider-level generation function
+  const generateFn = async (
+    _tier: TierId,
+    model: string,
+    req: QuestionGenerationRequest,
+    count: number,
+  ): Promise<GeneratedQuestion[]> => {
+    const result = await runStructuredTask<{ questions: GeneratedQuestion[] }>({
+      userId,
+      agent: "questions",
+      call: {
+        system: NIGHTMARE_RULES,
+        user: `Generate ${count} questions.\nRequest: ${JSON.stringify(req)}\nLanguage: ${req.language}. Nightmare mode: ${req.nightmareMode}.`,
+        schemaName: "generated_questions",
+        jsonSchema: QUESTION_SCHEMA,
+      },
+      counts: { questionsGenerated: count },
+      difficulty: req.difficulties[0],
+      overrideModel: model,
+      overrideTier: _tier,
+    });
+    return result.questions ?? [];
+  };
+
+  // LLM validation function (optional, injected into batch)
+  const validateFn = async (
+    question: GeneratedQuestion,
+  ): Promise<{ passed: boolean } | null> => {
+    try {
+      const report = await validateQuestionTask(userId, question);
+      return { passed: report.passed };
+    } catch {
+      return null;
+    }
+  };
+
+  // Run with credit reservation
+  return withCredits(
     userId,
-    agent: "questions",
-    call: {
-      system: NIGHTMARE_RULES,
-      user: `Generate ${request.count} questions.\nRequest: ${JSON.stringify(request)}\nLanguage: ${request.language}. Nightmare mode: ${request.nightmareMode}.`,
-      schemaName: "generated_questions",
-      jsonSchema: QUESTION_SCHEMA,
+    `qgen_${request.subjectSlug}_${Date.now()}`,
+    "questions",
+    request.count,
+    async () => {
+      const batchResult = await generateBatch(
+        request,
+        [], // existingQuestions — would be loaded from DB in a full implementation
+        generateFn,
+        validateFn,
+        autoRoutingEnabled,
+        config.model,
+      );
+      return batchResult.approved;
     },
-    counts: { questionsGenerated: request.count },
-  });
-  return result.questions ?? [];
+  );
 }
 
 export async function validateQuestionTask(
@@ -189,6 +246,7 @@ export async function analyzeDocumentTask(
   return runStructuredTask<ExtractedSyllabus>({
     userId,
     agent: "syllabus",
+    bulk: true,
     call: {
       system:
         "You are the Syllabus Agent. Map the material into units/chapters/topics/concepts. Every concept MUST carry a source reference; drop anything you cannot source.",

@@ -48,3 +48,13 @@ export const AI_CONFIG_DEFAULTS = {
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
   openai: "WISO AI (GPT-5.6)",
 };
+
+/** WISO intelligence tiers — internal, never exposed to the frontend. */
+export type TierId = "luna" | "terra" | "sol";
+
+/** Maps each tier to its GPT-5.6 model ID. */
+export const TIER_MODEL_MAP: Record<TierId, string> = {
+  luna: "openai/gpt-5.6-luna",
+  terra: "openai/gpt-5.6-terra",
+  sol: "openai/gpt-5.6-sol",
+};
