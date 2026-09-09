@@ -1,1 +1,0 @@
-import{h as e,v as t}from"./index-B8f3ITJ9.js";var n=t(),r=()=>(0,n.jsx)(e,{});export{r as component};

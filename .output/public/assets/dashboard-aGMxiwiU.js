@@ -1,1 +1,0 @@
-import{v as e}from"./index-B8f3ITJ9.js";var t=e();function n(){return(0,t.jsxs)(`main`,{dir:`rtl`,className:`mx-auto max-w-4xl px-6 py-16`,children:[(0,t.jsx)(`h1`,{className:`text-2xl font-semibold`,children:`لوحة الطالب`}),(0,t.jsx)(`p`,{className:`mt-2 text-muted-foreground`,children:`قيد الإعداد.`})]})}export{n as component};
